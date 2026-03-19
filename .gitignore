@@ -47,6 +47,9 @@ mvnw.cmd
 .claude/
 ag_context/
 
+# === Game saves ===
+saves/
+
 # === Logs & temp ===
 *.log
 hs_err_pid*

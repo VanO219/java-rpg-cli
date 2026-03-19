@@ -13,6 +13,18 @@ package rpg;
 // mana и rage — private-поля, недоступные извне; логика их расхода — внутренняя деталь класса.
 public class Mage extends GameCharacter {
 
+    // ===== serialVersionUID — ВЕРСИЯ КЛАССА ДЛЯ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // Mage наследует Serializable от GameCharacter — повторно писать implements не нужно.
+    // Но serialVersionUID объявляется в КАЖДОМ классе иерархии отдельно, потому что
+    // при десериализации JVM проверяет версию каждого класса в цепочке наследования:
+    //   GameCharacter (serialVersionUID = 1L) → Mage (serialVersionUID = 1L)
+    //
+    // Если в будущем мы добавим Mage новое поле (например, spellBook), мы изменим
+    // serialVersionUID только у Mage, не трогая GameCharacter.
+    // Подробное объяснение serialVersionUID — см. GameCharacter.java.
+    private static final long serialVersionUID = 1L;
+
     // Текущая мана (магическая энергия). Тратится при использовании заклинаний.
     // private — доступно только внутри Mage.
     private int mana;
@@ -145,5 +157,18 @@ public class Mage extends GameCharacter {
      */
     public int getMana() {
         return mana;
+    }
+
+    // ===== СЕТТЕР ДЛЯ БИНАРНОЙ ДЕСЕРИАЛИЗАЦИИ (глава 6.7) =====
+    //
+    // При бинарной загрузке (DataInputStream) мы создаём нового Mage через конструктор,
+    // а затем восстанавливаем каждое поле отдельно.
+    // Конструктор Mage(name) устанавливает mana = maxMana (полная мана),
+    // но сохранённое значение может быть другим (маг потратил ману в бою).
+    // Без этого сеттера загруженная мана всегда была бы 100 — баг потери данных.
+    //
+    // Package-private видимость: доступен только из пакета rpg.
+    void setMana(int mana) {
+        this.mana = mana;
     }
 }

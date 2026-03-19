@@ -37,6 +37,24 @@ package rpg;
 //   attacker.performAttack();  // работает, т.к. Warrior реализует Attackable через GameCharacter
 public class Warrior extends GameCharacter {
 
+    // ===== serialVersionUID — ВЕРСИЯ КЛАССА ДЛЯ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // Warrior наследует интерфейс Serializable от GameCharacter (implements Serializable).
+    // В Java если родительский класс реализует интерфейс, все наследники тоже его реализуют
+    // автоматически — НЕ нужно писать "implements Serializable" повторно.
+    //
+    // Однако serialVersionUID нужно объявить В КАЖДОМ классе иерархии отдельно:
+    //   - GameCharacter имеет свой serialVersionUID = 1L (для своих полей: name, health, attack...)
+    //   - Warrior имеет свой serialVersionUID = 1L (для своего поля: rage)
+    //
+    // Почему? При десериализации JVM проверяет serialVersionUID КАЖДОГО класса в цепочке
+    // наследования. Если Warrior изменится (добавится новое поле), его serialVersionUID
+    // нужно будет обновить, не затрагивая GameCharacter.
+    //
+    // Без явного serialVersionUID: добавление поля в Warrior сломает загрузку старых сохранений,
+    // даже если GameCharacter не менялся (см. подробное объяснение в GameCharacter.java).
+    private static final long serialVersionUID = 1L;
+
     // Собственное поле класса Warrior — ярость. Только у воина есть это свойство.
     // private — доступно только внутри Warrior (не видно в Mage или Archer).
     // Инициализация при объявлении: = 0 — начальное значение.
@@ -151,5 +169,19 @@ public class Warrior extends GameCharacter {
      */
     public int getRage() {
         return rage;
+    }
+
+    // ===== СЕТТЕР ДЛЯ БИНАРНОЙ ДЕСЕРИАЛИЗАЦИИ (глава 6.7) =====
+    //
+    // При бинарной загрузке (DataInputStream) объект создаётся через конструктор
+    // new Warrior(name), а затем поля восстанавливаются по одному.
+    // В отличие от ObjectInputStream (который записывает/читает объект целиком),
+    // бинарный формат требует «ручной» установки каждого поля.
+    //
+    // Package-private видимость (без модификатора): доступен только классам
+    // из того же пакета rpg (например, Game.restoreState).
+    // Это безопаснее, чем public — внешний код не сможет менять ярость напрямую.
+    void setRage(int rage) {
+        this.rage = rage;
     }
 }

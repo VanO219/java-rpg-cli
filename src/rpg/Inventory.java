@@ -13,6 +13,15 @@ package rpg;
 // от ОБХОДА данных. Коллекция хранит, итератор обходит.
 // Без Iterator каждая коллекция имела бы свой способ обхода — хаос.
 // С Iterator любой код, работающий с Iterator, работает с ЛЮБОЙ коллекцией.
+// ===== ИМПОРТ Serializable (глава 6.10) =====
+//
+// java.io.Serializable — маркерный интерфейс, разрешающий объектную сериализацию.
+// При сериализации Inventory ObjectOutputStream обходит ВСЕ поля объекта.
+// Если поле содержит объект, этот объект тоже должен быть Serializable.
+// Поэтому не только Inventory, но и все его вложенные классы (Slot, ItemInfo)
+// тоже реализуют Serializable — иначе writeObject() выбросит NotSerializableException.
+import java.io.Serializable;
+
 import java.util.Iterator;
 
 // ===== ИМПОРТ NoSuchElementException =====
@@ -58,7 +67,28 @@ import java.util.NoSuchElementException;
 // Итерируемый тип — Inventory<T>.Slot (внутренний класс, содержащий предмет и количество).
 // Запись Inventory<T>.Slot нужна, потому что Slot — нестатический внутренний класс,
 // и его полное имя включает тип внешнего класса.
-public class Inventory<T> implements Iterable<Inventory<T>.Slot> {
+// ===== implements Serializable — СЕРИАЛИЗАЦИЯ ИНВЕНТАРЯ (глава 6.10) =====
+//
+// Inventory реализует Serializable, чтобы его можно было сохранить через ObjectOutputStream.
+// При сериализации Game объект Inventory — его поле, и ObjectOutputStream рекурсивно
+// сериализует все достижимые объекты. Если Inventory не реализует Serializable —
+// сериализация Game упадёт с NotSerializableException.
+//
+// ВАЖНО: при сериализации обобщённого класса параметр типа T стирается (type erasure, глава 3.31).
+// ObjectOutputStream записывает РЕАЛЬНЫЕ объекты (например, ItemInfo), а не параметр T.
+// При десериализации объекты восстанавливаются с их настоящими типами.
+public class Inventory<T> implements Iterable<Inventory<T>.Slot>, Serializable {
+
+    // ===== serialVersionUID — ВЕРСИЯ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // Уникальный идентификатор версии класса для контроля совместимости сериализации.
+    // При десериализации JVM сравнивает UID из файла с UID в классе.
+    // Несовпадение → InvalidClassException (файл сохранения несовместим с текущей версией кода).
+    //
+    // Объявляем явно (1L), чтобы изменения в классе (новые методы, рефакторинг)
+    // не ломали загрузку старых сохранений. Увеличиваем UID только при несовместимых
+    // изменениях (удаление/переименование полей, изменение типов).
+    private static final long serialVersionUID = 1L;
 
     // ===== INNER CLASS (внутренний нестатический класс) — Slot =====
     //
@@ -82,7 +112,27 @@ public class Inventory<T> implements Iterable<Inventory<T>.Slot> {
     // Без привязки к Inventory Slot не знал бы, какой тип T хранить.
     //
     // public — Slot доступен извне (for-each возвращает Slot-объекты, их нужно использовать).
-    public class Slot {
+    //
+    // ===== Serializable для ВНУТРЕННЕГО класса (глава 6.10) =====
+    //
+    // Slot реализует Serializable, потому что Inventory хранит массив Slot-объектов.
+    // При сериализации Inventory ObjectOutputStream рекурсивно обходит все поля,
+    // включая массив slots[]. Каждый элемент массива — объект Slot.
+    // Если Slot не реализует Serializable — NotSerializableException.
+    //
+    // ПРАВИЛО: если внешний класс Serializable и содержит объекты внутреннего класса,
+    // внутренний класс тоже ОБЯЗАН быть Serializable.
+    //
+    // ОСОБЕННОСТЬ inner class: нестатический внутренний класс хранит скрытую ссылку
+    // на внешний объект (Inventory.this). При сериализации Slot эта ссылка тоже
+    // сериализуется → внешний Inventory тоже должен быть Serializable (что мы и сделали).
+    // Это цепная реакция: Serializable «заразен» — требует Serializable от всех
+    // достижимых объектов в графе ссылок.
+    public class Slot implements Serializable {
+
+        // serialVersionUID для Slot — контроль версии внутреннего класса.
+        // Каждый Serializable-класс (включая внутренние) должен иметь свой UID.
+        private static final long serialVersionUID = 1L;
 
         // T item — предмет, хранящийся в ячейке.
         // Тип T берётся из внешнего класса Inventory<T>.
@@ -174,7 +224,22 @@ public class Inventory<T> implements Iterable<Inventory<T>.Slot> {
     //
     // Аналогия: static nested class — как обычный класс, просто «живёт внутри» другого
     // для логической группировки. Inventory.ItemInfo говорит: «это ItemInfo для инвентаря».
-    public static class ItemInfo {
+    //
+    // ===== Serializable для СТАТИЧЕСКОГО вложенного класса (глава 6.10) =====
+    //
+    // ItemInfo тоже реализует Serializable. Хотя static nested class НЕ имеет ссылки
+    // на внешний объект (в отличие от inner class Slot), его объекты могут храниться
+    // в ячейках инвентаря (как параметр типа T). При сериализации Inventory<ItemInfo>
+    // ObjectOutputStream запишет каждый ItemInfo — и он обязан быть Serializable.
+    //
+    // Разница с inner class Slot:
+    //   Slot (inner class)     — сериализация ВКЛЮЧАЕТ ссылку на Inventory.this
+    //   ItemInfo (static class) — сериализуется НЕЗАВИСИМО от Inventory
+    // Static nested class проще для сериализации: нет скрытых ссылок, нет побочных эффектов.
+    public static class ItemInfo implements Serializable {
+
+        // serialVersionUID для ItemInfo — контроль версии статического вложенного класса.
+        private static final long serialVersionUID = 1L;
 
         // final — значение нельзя изменить после инициализации (в конструкторе).
         // String name — название предмета (например, "Зелье здоровья").

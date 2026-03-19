@@ -99,8 +99,13 @@ import java.util.NoSuchElementException;
 // File — класс, представляющий ПУТЬ к файлу или директории (не содержимое!).
 // FileNotFoundException — checked exception: файл по указанному пути не найден.
 //   Наследник IOException → наследник Exception (НЕ RuntimeException).
+// Serializable — МАРКЕРНЫЙ ИНТЕРФЕЙС (marker interface): не содержит ни одного метода.
+//   Реализация означает: «JVM разрешено сериализовать объекты этого класса».
+//   Без implements Serializable попытка ObjectOutputStream.writeObject(game) бросит
+//   java.io.NotSerializableException во время выполнения (не при компиляции!).
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.Serializable;
 
 // Game — главный класс игры, управляющий игровым процессом.
 // Этот файл — самый насыщенный конструкциями Java в проекте.
@@ -115,7 +120,44 @@ import java.io.FileNotFoundException;
 //   interface — для КОНТРАКТА без состояния (Attackable, Healable).
 //   enum — для ФИКСИРОВАННОГО НАБОРА констант (GameState, EnemyRank).
 // Game — имя класса. По соглашению Java — PascalCase (каждое слово с заглавной буквы).
-public class Game {
+// ===== СЕРИАЛИЗАЦИЯ КЛАССА Game (глава 6.10) =====
+//
+// implements Serializable — помечаем Game как сериализуемый.
+// Это позволяет сохранить ВЕСЬ объект Game в файл через ObjectOutputStream.writeObject().
+//
+// Game — самый сложный сериализуемый класс в проекте: содержит hero (GameCharacter),
+// inventory (Inventory), коллекции (Set, TreeSet, LinkedList, Bestiary) и примитивы.
+// При сериализации ObjectOutputStream РЕКУРСИВНО обходит все поля:
+//   game → hero (GameCharacter → Warrior/Mage/Archer) → inventory → slots → ...
+// Каждый объект в этой цепочке ОБЯЗАН реализовать Serializable.
+//
+// Поля, помеченные transient, ПРОПУСКАЮТСЯ при сериализации:
+//   - scanner (Scanner) — системный ресурс, нельзя сериализовать.
+//   - battleLog — сессионные данные, начинаются заново.
+//   - undoStack — сессионные данные.
+//   - lootTable — статические данные, восстанавливаются из кода.
+//   - listener — callback-объект, создаётся заново.
+//   - damageDealtThisBattle, heroTookDamageThisBattle, undoUsedThisBattle — сессионные флаги боя.
+public class Game implements Serializable {
+
+    // ===== serialVersionUID — ВЕРСИЯ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // Когда ObjectOutputStream записывает объект Game, он включает в файл serialVersionUID.
+    // При чтении ObjectInputStream сравнивает UID из файла с UID текущего класса.
+    // Если не совпадают → InvalidClassException ("версия сохранения несовместима").
+    //
+    // Зачем? Допустим, мы добавили новое поле в Game (например, int gold).
+    // Без явного serialVersionUID:
+    //   JVM вычисляет UID автоматически из структуры класса.
+    //   Новое поле → другая структура → другой UID → старые сохранения нечитаемы!
+    //
+    // С явным serialVersionUID = 1L:
+    //   Мы контролируем совместимость. Новое поле = null/0 при загрузке старого сохранения.
+    //   UID меняем только при НЕСОВМЕСТИМЫХ изменениях (удаление поля, смена типа).
+    //
+    // private static final long — обязательный формат по спецификации Serializable.
+    // 1L — начальная версия. L — суффикс литерала long (64-битное целое).
+    private static final long serialVersionUID = 1L;
 
     // ===== КОНСТАНТЫ И СТАТИЧЕСКИЕ ПОЛЯ =====
     //
@@ -167,7 +209,24 @@ public class Game {
     // Scanner(System.in) — привязывается к стандартному потоку ввода (клавиатура).
     // Методы: nextLine() (строка), nextInt() (число), hasNextLine() (есть ли ввод).
     // ВАЖНО: Scanner(System.in) не нужно закрывать — это закроет System.in навсегда!
-    private Scanner scanner;
+    // ===== transient — ИСКЛЮЧЕНИЕ ПОЛЯ ИЗ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // transient — модификатор, который ЗАПРЕЩАЕТ сериализацию поля.
+    // При ObjectOutputStream.writeObject() поле с transient ПРОПУСКАЕТСЯ.
+    // При ObjectInputStream.readObject() поле получает значение по умолчанию:
+    //   null для объектов, 0 для int, false для boolean.
+    //
+    // Зачем transient?
+    //   1. Поле нельзя сериализовать (Scanner — привязан к System.in, системный ресурс).
+    //   2. Поле не нужно сохранять (battleLog — начинается заново каждую сессию).
+    //   3. Поле восстанавливается из кода (lootTable — статические данные).
+    //
+    // ВАЖНО: после десериализации ВСЕ transient-поля = null/0/false!
+    // Нужно вызвать reinitializeTransients() для их пересоздания.
+    //
+    // Scanner не реализует Serializable. Без transient при попытке сериализации
+    // Game вылетит java.io.NotSerializableException: java.util.Scanner.
+    private transient Scanner scanner;
 
     // ===== ПОБИТОВЫЕ ФЛАГИ ДЛЯ СТАТУСНЫХ ЭФФЕКТОВ (глава 2 — побитовые операции) =====
     //
@@ -208,7 +267,9 @@ public class Game {
     // Паттерн «Наблюдатель» (Observer): Game уведомляет listener о событиях боя,
     // не зная КТО слушает и ЧТО делает с информацией (слабая связанность — loose coupling).
     // Инициализируется в конструкторе через анонимный класс (см. ниже).
-    private BattleEventListener listener;
+    // transient — callback-объект, создаётся заново при каждом запуске.
+    // BattleEventListener — анонимный класс, не Serializable.
+    private transient BattleEventListener listener;
 
     // ===== СЧЁТЧИКИ СТАТИСТИКИ =====
     //
@@ -221,7 +282,8 @@ public class Game {
     private int totalDamageReceived = 0;
     private int enemiesDefeated = 0;
     private int totalHealing = 0;
-    private int damageDealtThisBattle = 0; // урон за текущий бой (для бестиария)
+    // transient — урон за текущий бой (сессионный, не сохраняется).
+    private transient int damageDealtThisBattle = 0;
 
     // ===== НОВЫЕ ПОЛЯ — КОЛЛЕКЦИИ (глава 5) =====
 
@@ -232,7 +294,9 @@ public class Game {
     // Операции: add() — O(1) в среднем, get(i) — O(1), size() — O(1).
     //
     // battleLog записывает ключевые события боя для отображения после сражения.
-    private List<String> battleLog;
+    // transient — журнал боя начинается заново каждую сессию.
+    // ArrayList не хранит ценных данных между запусками.
+    private transient List<String> battleLog;
 
     // ===== LinkedList<String> — ЖУРНАЛ КВЕСТОВ (5.3) =====
     //
@@ -260,7 +324,11 @@ public class Game {
     //   1. Типобезопасность: ключ — enum, нельзя передать невалидный индекс.
     //   2. Читаемость: lootTable.get(EnemyRank.BOSS) вместо lootTable[4].
     //   3. Гибкость: у каждого ранга может быть РАЗНОЕ количество лута.
-    private Map<EnemyRank, List<LootDrop>> lootTable;
+    // transient — таблица лута — СТАТИЧЕСКИЕ данные, зашитые в коде.
+    // Нет смысла сохранять: восстанавливается вызовом setupLootTable().
+    // HashMap<EnemyRank, List<LootDrop>> содержит только константные значения,
+    // одинаковые при каждом запуске.
+    private transient Map<EnemyRank, List<LootDrop>> lootTable;
 
     // ===== Set<Achievement> — ДОСТИЖЕНИЯ (5.4) =====
     //
@@ -301,10 +369,12 @@ public class Game {
     //
     // undoStack сохраняет описания действий перед их выполнением.
     // Если игрок выбирает «Отменить ход» — можно откатить последнее действие.
-    private ArrayDeque<String> undoStack;
+    // transient — стек отмены сессионный, начинается заново.
+    private transient ArrayDeque<String> undoStack;
 
     // Флаг: использовал ли игрок отмену в текущем бою (разрешена 1 отмена за бой).
-    private boolean undoUsedThisBattle;
+    // transient — флаг сессионный, относится к текущему бою.
+    private transient boolean undoUsedThisBattle;
 
     // ===== Bestiary — БЕСТИАРИЙ (5.9) =====
     //
@@ -326,7 +396,8 @@ public class Game {
     // Надёжный способ — явный boolean-флаг:
     //   false в начале боя → true при получении любого урона.
     //   Нет урона = false → FLAWLESS заслужен.
-    private boolean heroTookDamageThisBattle = false;
+    // transient — флаг текущего боя, сбрасывается в начале каждого боя.
+    private transient boolean heroTookDamageThisBattle = false;
 
     // Счётчик использований спецатаки (для достижения SPECIALIST).
     private int specialAttackCount = 0;
@@ -467,9 +538,52 @@ public class Game {
         // Присваиваем enum-значение. GameState.EXPLORING — одна из констант enum GameState.
         gameState = GameState.EXPLORING;
 
-        createHero();
-        setupInventory();
-        setupLootTable();
+        // ===== ПРЕДЛОЖЕНИЕ ЗАГРУЗКИ СОХРАНЕНИЯ (глава 6.11) =====
+        //
+        // Перед созданием героя проверяем: есть ли директория saves/ с файлами?
+        // Если да — предлагаем загрузить. Если загрузка успешна — пропускаем createHero/setup.
+        //
+        // File — класс для работы с файловой системой (глава 6.11).
+        // new File("saves") — создаёт объект File (путь), НЕ создаёт файл/директорию.
+        // exists() — проверяет наличие файла/директории на диске.
+        // isDirectory() — проверяет, что путь указывает на директорию (не файл).
+        boolean loadedFromSave = false;
+        GameSaveManager saveManagerForCheck = new GameSaveManager();
+        File[] existingSaves = saveManagerForCheck.listSaves();
+
+        // existingSaves.length > 0 — есть хотя бы одно сохранение.
+        // Массив File[] — коллекция путей к файлам. length — размер массива.
+        if (existingSaves.length > 0) {
+            System.out.println("\nОбнаружены сохранения! Загрузить? (1 — да, 2 — новая игра)");
+            System.out.print("Ваш выбор: ");
+            int loadChoice = readInt();
+            if (loadChoice == 1) {
+                File[] saves = saveManagerForCheck.displaySavesList();
+                if (saves.length > 0) {
+                    System.out.print("Выберите файл (номер): ");
+                    int fileChoice = readInt();
+                    if (fileChoice > 0 && fileChoice <= saves.length) {
+                        File selectedFile = saves[fileChoice - 1];
+                        if (selectedFile.getName().endsWith(".dat")) {
+                            loadedFromSave = saveManagerForCheck.loadBinary(this, selectedFile.getName());
+                        } else if (selectedFile.getName().endsWith(".sav")) {
+                            Game loaded = saveManagerForCheck.loadObject(selectedFile.getName());
+                            if (loaded != null) {
+                                copyStateFrom(loaded);
+                                loadedFromSave = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Если загрузка не состоялась — создаём нового героя и инициализируем всё с нуля.
+        if (!loadedFromSave) {
+            createHero();
+            setupInventory();
+            setupLootTable();
+        }
 
         // ===== ДЕМОНСТРАЦИЯ СТИРАНИЯ ТИПОВ (Type Erasure, глава 3.31) =====
         //
@@ -1029,7 +1143,14 @@ public class Game {
             System.out.println("  2. Бестиарий");
             System.out.println("  3. Достижения");
             System.out.println("  4. Журнал");
-            System.out.println("  5. Покинуть");
+            // ===== НОВЫЕ ПУНКТЫ МЕНЮ — ВВОД-ВЫВОД (глава 6) =====
+            System.out.println("  5. Сохранить (бинарный формат)");
+            System.out.println("  6. Сохранить (объектный формат)");
+            System.out.println("  7. Загрузить игру");
+            System.out.println("  8. Экспорт журнала боёв");
+            System.out.println("  9. ZIP-архив сохранений");
+            System.out.println("  10. Console demo");
+            System.out.println("  11. Покинуть");
             System.out.print("Ваш выбор: ");
             int choice = readInt();
 
@@ -1054,11 +1175,167 @@ public class Game {
                     // Показать журнал квестов (5.3).
                     showQuestLog();
                 }
+
+                // ===== СОХРАНЕНИЕ В БИНАРНОМ ФОРМАТЕ (глава 6.3, 6.5, 6.7) =====
+                //
+                // GameSaveManager — отдельный класс для файловых операций.
+                // Создаём экземпляр с директорией по умолчанию ("saves").
+                // saveBinary(this) — передаём ТЕКУЩИЙ объект Game для сохранения.
+                //
+                // this — ключевое слово Java, ссылка на текущий объект.
+                // Внутри saveBinary() доступ к полям Game осуществляется через геттеры.
                 case 5 -> {
+                    GameSaveManager saveManager = new GameSaveManager();
+                    saveManager.saveBinary(this);
+                }
+
+                // ===== СОХРАНЕНИЕ В ОБЪЕКТНОМ ФОРМАТЕ (глава 6.10) =====
+                //
+                // saveObject() использует ObjectOutputStream.writeObject() —
+                // сериализует ВЕСЬ объект Game рекурсивно (включая hero, inventory и т.д.).
+                // transient-поля (scanner, battleLog, lootTable) пропускаются.
+                case 6 -> {
+                    GameSaveManager saveManager = new GameSaveManager();
+                    saveManager.saveObject(this);
+                }
+
+                // ===== ЗАГРУЗКА ИГРЫ (глава 6.3, 6.7, 6.10, 6.11) =====
+                //
+                // Показываем список доступных сохранений через displaySavesList().
+                // Пользователь выбирает файл по номеру.
+                // В зависимости от расширения (.dat или .sav) вызываем loadBinary или loadObject.
+                case 7 -> {
+                    handleLoadGame();
+                }
+
+                // ===== ЭКСПОРТ ЖУРНАЛА БОЁВ (глава 6.4, 6.6, 6.8, 6.9) =====
+                //
+                // BattleLogExporter.exportBattleLog() — статический метод.
+                // Принимает журнал боя и статистику, записывает в текстовый файл.
+                // Демонстрирует: ByteArrayOutputStream, FileWriter, BufferedWriter, PrintWriter.
+                case 8 -> {
+                    BattleLogExporter.exportBattleLog(
+                            battleLog, hero.getName(),
+                            totalDamageDealt, totalDamageReceived,
+                            enemiesDefeated, totalHealing
+                    );
+                }
+
+                // ===== ZIP-АРХИВ СОХРАНЕНИЙ (глава 6.12) =====
+                //
+                // Подменю: экспорт в ZIP или импорт из ZIP.
+                case 9 -> {
+                    handleZipMenu();
+                }
+
+                // ===== ДЕМОНСТРАЦИЯ Console (глава 6.13) =====
+                //
+                // ConsoleDemo.runDemo(scanner) — демо System.console().
+                // Если Console недоступен (IDE) — fallback на Scanner.
+                case 10 -> {
+                    ConsoleDemo.runDemo(scanner);
+                }
+
+                case 11 -> {
                     return false;
                 }
                 default -> System.out.println("Неверный выбор.");
             }
+        }
+    }
+
+    // ===== handleLoadGame() — ЗАГРУЗКА СОХРАНЕНИЯ (глава 6.3, 6.7, 6.10, 6.11) =====
+    //
+    // Показывает список файлов сохранений, позволяет выбрать один.
+    // В зависимости от расширения файла (.dat — бинарный, .sav — объектный)
+    // вызывает соответствующий метод загрузки.
+    private void handleLoadGame() {
+        GameSaveManager saveManager = new GameSaveManager();
+
+        // displaySavesList() — показывает пронумерованный список файлов.
+        // Возвращает массив File[] — все найденные файлы сохранений.
+        // File[] — массив объектов File (пути к файлам на диске).
+        File[] saves = saveManager.displaySavesList();
+
+        // saves.length — длина массива. Если 0 — нет сохранений.
+        if (saves.length == 0) {
+            return;
+        }
+
+        System.out.print("Выберите файл (номер) или 0 для отмены: ");
+        int fileChoice = readInt();
+
+        // Проверка диапазона: от 1 до saves.length включительно.
+        // 0 — отмена, отрицательные и слишком большие — невалидный ввод.
+        if (fileChoice <= 0 || fileChoice > saves.length) {
+            if (fileChoice != 0) {
+                System.out.println("Неверный выбор.");
+            }
+            return;
+        }
+
+        // Массивы в Java индексируются с 0, но пользователю показываем с 1.
+        // fileChoice - 1 — преобразуем «номер для человека» в «индекс массива».
+        File selectedFile = saves[fileChoice - 1];
+
+        // String.endsWith(String) — проверяет суффикс строки.
+        // .dat → бинарный формат (DataInputStream/DataOutputStream).
+        // .sav → объектный формат (ObjectInputStream/ObjectOutputStream).
+        if (selectedFile.getName().endsWith(".dat")) {
+            // loadBinary(this, filename) — загружает данные и вызывает restoreState().
+            // Возвращает true при успехе, false при ошибке.
+            saveManager.loadBinary(this, selectedFile.getName());
+        } else if (selectedFile.getName().endsWith(".sav")) {
+            // loadObject(filename) — десериализует Game целиком.
+            // Возвращает НОВЫЙ объект Game (не модифицирует текущий).
+            // Если загрузка успешна — копируем состояние из нового объекта.
+            Game loaded = saveManager.loadObject(selectedFile.getName());
+            if (loaded != null) {
+                // copyStateFrom() копирует все поля и вызывает reinitializeTransients().
+                copyStateFrom(loaded);
+            }
+        }
+    }
+
+    // ===== handleZipMenu() — ПОДМЕНЮ ZIP-АРХИВАЦИИ (глава 6.12) =====
+    //
+    // ZIP (от «zipper» — молния) — формат архивации, объединяющий несколько файлов в один.
+    // Используется для бэкапа и переноса сохранений.
+    private void handleZipMenu() {
+        System.out.println("\n── ZIP-архив ──");
+        System.out.println("  1. Экспорт (упаковать сохранения в ZIP)");
+        System.out.println("  2. Импорт (распаковать ZIP)");
+        System.out.println("  3. Назад");
+        System.out.print("Ваш выбор: ");
+        int zipChoice = readInt();
+
+        switch (zipChoice) {
+            case 1 -> {
+                // Нормализуем имя героя для поиска файлов.
+                // GameSaveManager.normalizeHeroName() — приводит к нижнему регистру,
+                // заменяет пробелы на _, убирает спецсимволы.
+                String heroName = GameSaveManager.normalizeHeroName(hero.getName());
+                SaveArchiver.exportToZip(heroName, "saves");
+            }
+            case 2 -> {
+                // Показываем доступные ZIP-файлы.
+                File[] zips = SaveArchiver.listZipFiles("saves");
+                if (zips == null || zips.length == 0) {
+                    System.out.println("[ZIP] Нет ZIP-файлов в директории saves/.");
+                    return;
+                }
+                System.out.println("\n===== ZIP-файлы =====");
+                for (int i = 0; i < zips.length; i++) {
+                    System.out.printf("  %d. %s (%d байт)%n", i + 1, zips[i].getName(), zips[i].length());
+                }
+                System.out.print("Выберите ZIP (номер) или 0 для отмены: ");
+                int zipFileChoice = readInt();
+                if (zipFileChoice > 0 && zipFileChoice <= zips.length) {
+                    SaveArchiver.importFromZip(zips[zipFileChoice - 1].getAbsolutePath(), "saves", scanner);
+                }
+            }
+            case 3 -> { }
+            default -> System.out.println("Неверный выбор.");
         }
     }
 
@@ -2598,6 +2875,25 @@ public class Game {
         System.out.println("══════════════════════════════");
 
         System.out.println();
+
+        // ===== ПРЕДЛОЖЕНИЕ ЭКСПОРТА ЖУРНАЛА БОЁВ (глава 6.4, 6.6, 6.8, 6.9) =====
+        //
+        // После показа итоговой статистики предлагаем сохранить журнал боёв в файл.
+        // battleLog может быть пуст (если герой погиб в первом же бою без записей).
+        // BattleLogExporter проверяет пустоту внутри и сообщает пользователю.
+        if (battleLog != null && !battleLog.isEmpty()) {
+            System.out.println("Экспортировать журнал боёв в файл? (1 — да, 2 — нет)");
+            System.out.print("Ваш выбор: ");
+            int exportChoice = readInt();
+            if (exportChoice == 1) {
+                BattleLogExporter.exportBattleLog(
+                        battleLog, hero.getName(),
+                        totalDamageDealt, totalDamageReceived,
+                        enemiesDefeated, totalHealing
+                );
+            }
+        }
+
         System.out.println("Спасибо за игру!");
     }
 
@@ -2668,5 +2964,309 @@ public class Game {
             //   try { return 42; } finally { return -1; } → вернёт -1, а не 42!
             //   Никогда не пишите return в finally.
         }
+    }
+
+    // ===== PACKAGE-PRIVATE ГЕТТЕРЫ ДЛЯ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // Package-private (без модификатора доступа) — доступны ТОЛЬКО из того же пакета.
+    // В Java четыре уровня доступа (от самого открытого к самому закрытому):
+    //   public          — из любого пакета.
+    //   protected       — из того же пакета + из наследников (даже в другом пакете).
+    //   (package-private) — только из того же пакета (НЕТ ключевого слова, пишем БЕЗ модификатора).
+    //   private         — только из того же класса.
+    //
+    // Зачем package-private, а не public?
+    //   Поля Game — внутренняя деталь реализации. Внешний код не должен зависеть от них.
+    //   Но GameSaveManager (в том же пакете rpg) должен читать эти поля для сохранения.
+    //   Package-private — идеальный баланс: доступ внутри пакета, скрытость снаружи.
+    //
+    // Соглашение getXxx() — стандартный паттерн JavaBeans для геттеров.
+    // Даже без модификатора public это принято писать в стиле getField().
+
+    GameCharacter getHero() {
+        return hero;
+    }
+
+    Inventory<Inventory.ItemInfo> getInventory() {
+        return inventory;
+    }
+
+    GameState getGameState() {
+        return gameState;
+    }
+
+    // Сеттер для gameState — нужен для исправления BATTLE → EXPLORING при загрузке.
+    // Бой нельзя восстановить (враги создаются заново), поэтому loadObject() переводит
+    // состояние в EXPLORING, если сохранение было сделано в середине боя.
+    void setGameState(GameState state) {
+        this.gameState = state;
+    }
+
+    byte getStatusFlags() {
+        return statusFlags;
+    }
+
+    int getTotalDamageDealt() {
+        return totalDamageDealt;
+    }
+
+    int getTotalDamageReceived() {
+        return totalDamageReceived;
+    }
+
+    int getEnemiesDefeated() {
+        return enemiesDefeated;
+    }
+
+    int getTotalHealing() {
+        return totalHealing;
+    }
+
+    int getSpecialAttackCount() {
+        return specialAttackCount;
+    }
+
+    int getLootItemsCollected() {
+        return lootItemsCollected;
+    }
+
+    Set<Achievement> getAchievements() {
+        return achievements;
+    }
+
+    TreeSet<BattleRecord> getLeaderboard() {
+        return leaderboard;
+    }
+
+    Bestiary getBestiary() {
+        return bestiary;
+    }
+
+    LinkedList<String> getQuestLog() {
+        return questLog;
+    }
+
+    List<String> getBattleLog() {
+        return battleLog;
+    }
+
+    Scanner getScanner() {
+        return scanner;
+    }
+
+    // ===== restoreState() — ВОССТАНОВЛЕНИЕ СОСТОЯНИЯ ИЗ БИНАРНОГО ФОРМАТА (глава 6.3, 6.7) =====
+    //
+    // Вызывается из GameSaveManager.loadBinary() после чтения ВСЕХ данных из файла.
+    // Принимает ВСЕ загруженные значения как параметры и устанавливает поля Game.
+    //
+    // Почему нельзя просто присвоить поля напрямую из GameSaveManager?
+    //   1. Поля Game — private. GameSaveManager не может обращаться к ним напрямую.
+    //      (даже из того же пакета private поля недоступны!)
+    //   2. Логика восстановления сложная: нужно создать правильный подкласс героя,
+    //      восстановить инвентарь, пересоздать transient-поля.
+    //   3. Инкапсуляция: Game сам знает, как восстановить своё состояние.
+    //
+    // Параметры идут В ТОМ ЖЕ ПОРЯДКЕ, что и запись в saveBinary():
+    //   Герой → Инвентарь → Состояние → Счётчики → Коллекции
+    //
+    // java.util.TreeMap передаётся для бестиария (восстановление внутренней структуры).
+    void restoreState(
+            String heroType, String heroName,
+            int health, int maxHealth, int attack, int defense, int level, int experience,
+            int rage, int mana, double critChance,
+            int inventoryCapacity, String[] itemNames, int[] itemValues, int[] itemQuantities,
+            GameState loadedGameState, byte loadedStatusFlags,
+            int loadedTotalDamageDealt, int loadedTotalDamageReceived, int loadedEnemiesDefeated,
+            int loadedTotalHealing, int loadedSpecialAttackCount, int loadedLootItemsCollected,
+            Set<Achievement> loadedAchievements,
+            java.util.TreeMap<String, Bestiary.BestiaryEntry> bestiaryEntries,
+            TreeSet<BattleRecord> loadedLeaderboard,
+            LinkedList<String> loadedQuestLog
+    ) {
+        // ===== СОЗДАНИЕ ГЕРОЯ ПО ТИПУ (полиморфизм, глава 3.5) =====
+        //
+        // switch-expression определяет, какой подкласс создать.
+        // Конструктор принимает только имя — базовые характеристики фиксированы.
+        // Затем через addExperience() повышаем уровень до сохранённого.
+        //
+        // Порядок восстановления:
+        //   1. Создать героя (уровень 1, начальные характеристики).
+        //   2. addExperience() — повысить уровень (увеличивает maxHealth, attack, defense).
+        //   3. takeDamage() — уменьшить здоровье до сохранённого значения.
+        this.hero = switch (heroType) {
+            case "Воин" -> new Warrior(heroName);
+            case "Маг" -> new Mage(heroName);
+            case "Лучник" -> new Archer(heroName);
+            default -> throw new IllegalArgumentException("Неизвестный тип героя: " + heroType);
+        };
+
+        // addExperience() — добавляет опыт и АВТОМАТИЧЕСКИ повышает уровень.
+        // Внутри: while (experience >= level * 100) { levelUp(); }
+        // levelUp() увеличивает maxHealth (+10), attack (+2), defense (+1), health = maxHealth.
+        //
+        // После вызова hero будет на правильном уровне с правильными maxHealth, attack, defense.
+        // Единственное расхождение — health (после levelUp всегда = maxHealth,
+        // а сохранённое значение может быть ниже из-за полученного урона).
+        if (experience > 0) {
+            hero.addExperience(experience);
+        }
+
+        // Корректируем здоровье: если сохранённое здоровье < maxHealth,
+        // наносим «виртуальный» урон для приведения к нужному значению.
+        // hero.getMaxHealth() — текущий максимум после повышения уровня.
+        // takeDamage(разница) — уменьшает health на указанную величину.
+        if (health < hero.getMaxHealth()) {
+            hero.takeDamage(hero.getMaxHealth() - health);
+        }
+
+        // ===== ВОССТАНОВЛЕНИЕ ПОДКЛАСС-СПЕЦИФИЧНЫХ ПОЛЕЙ (pattern matching, глава 3.26) =====
+        //
+        // Каждый подкласс героя имеет уникальное поле (rage/mana/critChance),
+        // которое конструктор устанавливает в значение по умолчанию.
+        // После создания героя нужно восстановить сохранённое значение.
+        //
+        // pattern matching instanceof (Java 16+): «if (hero instanceof Warrior w)»
+        // одновременно проверяет тип И создаёт переменную w типа Warrior.
+        // Без pattern matching пришлось бы писать:
+        //   if (hero instanceof Warrior) { ((Warrior) hero).setRage(rage); }
+        // С pattern matching — короче и безопаснее (нет ручного каста).
+        if (hero instanceof Warrior w) {
+            w.setRage(rage);
+        } else if (hero instanceof Mage m) {
+            m.setMana(mana);
+        } else if (hero instanceof Archer a) {
+            a.setCritChance(critChance);
+        }
+
+        // ===== ВОССТАНОВЛЕНИЕ ИНВЕНТАРЯ =====
+        //
+        // Создаём новый инвентарь с сохранённой ёмкостью.
+        // Добавляем каждый предмет через addItem().
+        // InventoryFullException — checked, но здесь невозможна (ёмкость соответствует данным).
+        this.inventory = new Inventory<>(inventoryCapacity);
+        for (int i = 0; i < itemNames.length; i++) {
+            try {
+                inventory.addItem(new Inventory.ItemInfo(itemNames[i], itemValues[i]), itemQuantities[i]);
+            } catch (InventoryFullException e) {
+                System.out.println("[Загрузка] Предупреждение: инвентарь переполнен, предмет " + itemNames[i] + " пропущен.");
+            }
+        }
+
+        // ===== ВОССТАНОВЛЕНИЕ ПРИМИТИВНЫХ ПОЛЕЙ =====
+        this.gameState = loadedGameState;
+        this.statusFlags = loadedStatusFlags;
+        this.totalDamageDealt = loadedTotalDamageDealt;
+        this.totalDamageReceived = loadedTotalDamageReceived;
+        this.enemiesDefeated = loadedEnemiesDefeated;
+        this.totalHealing = loadedTotalHealing;
+        this.specialAttackCount = loadedSpecialAttackCount;
+        this.lootItemsCollected = loadedLootItemsCollected;
+
+        // ===== ВОССТАНОВЛЕНИЕ КОЛЛЕКЦИЙ =====
+        //
+        // Присваиваем загруженные коллекции напрямую.
+        // Они уже созданы в loadBinary() — новые объекты, не ссылки на старые.
+        this.achievements = loadedAchievements;
+        this.leaderboard = loadedLeaderboard;
+        this.questLog = loadedQuestLog;
+
+        // Восстановление бестиария из TreeMap.
+        // Bestiary — обёртка над TreeMap, нужно заполнить его записями.
+        this.bestiary = new Bestiary();
+        for (java.util.Map.Entry<String, Bestiary.BestiaryEntry> entry : bestiaryEntries.entrySet()) {
+            Bestiary.BestiaryEntry be = entry.getValue();
+            bestiary.addEntry(entry.getKey(), be.rank(), be.maxDamageDealt());
+            // addEntry создаёт запись с killCount=1, но нам нужно точное значение.
+            // Для каждого дополнительного убийства вызываем addEntry ещё раз —
+            // addEntry увеличивает killCount при повторном вызове.
+            for (int k = 1; k < be.killCount(); k++) {
+                bestiary.addEntry(entry.getKey(), be.rank(), 0);
+            }
+        }
+
+        // Пересоздаём transient-поля (scanner, battleLog, undoStack, lootTable, listener).
+        reinitializeTransients();
+
+        System.out.println("[Загрузка] Состояние игры восстановлено.");
+    }
+
+    // ===== copyStateFrom(Game) — КОПИРОВАНИЕ СОСТОЯНИЯ ИЗ ЗАГРУЖЕННОГО ОБЪЕКТА (глава 6.10) =====
+    //
+    // При загрузке через ObjectInputStream (loadObject) создаётся НОВЫЙ объект Game.
+    // Java не позволяет переназначить this — нельзя написать «this = loaded».
+    // Поэтому копируем каждое поле из загруженного объекта в текущий.
+    //
+    // Этот метод вынесен отдельно, чтобы избежать дублирования кода (DRY — Don't Repeat Yourself).
+    // Копирование нужно в двух местах:
+    //   1. start() — при загрузке сохранения перед началом игры.
+    //   2. handleLoadGame() — при загрузке из меню между боями.
+    //
+    // private — вызывается только внутри Game, внешний доступ не нужен.
+    private void copyStateFrom(Game source) {
+        this.hero = source.hero;
+        this.inventory = source.inventory;
+        this.gameState = source.gameState;
+        this.statusFlags = source.statusFlags;
+        this.totalDamageDealt = source.totalDamageDealt;
+        this.totalDamageReceived = source.totalDamageReceived;
+        this.enemiesDefeated = source.enemiesDefeated;
+        this.totalHealing = source.totalHealing;
+        this.specialAttackCount = source.specialAttackCount;
+        this.lootItemsCollected = source.lootItemsCollected;
+        this.achievements = source.achievements;
+        this.leaderboard = source.leaderboard;
+        this.questLog = source.questLog;
+        this.bestiary = source.bestiary;
+        reinitializeTransients();
+    }
+
+    // ===== reinitializeTransients() — ПЕРЕСОЗДАНИЕ TRANSIENT-ПОЛЕЙ (глава 6.10) =====
+    //
+    // После десериализации (ObjectInputStream.readObject()) ВСЕ transient-поля = null.
+    // Java НЕ вызывает конструктор при десериализации (объект создаётся "в обход").
+    // Поэтому нужен отдельный метод для инициализации transient-полей.
+    //
+    // Этот метод вызывается из:
+    //   1. loadBinary() → restoreState() → reinitializeTransients()
+    //   2. loadObject() → reinitializeTransients() (напрямую, для десериализованного объекта)
+    //
+    // Package-private — доступен из GameSaveManager (тот же пакет rpg).
+    void reinitializeTransients() {
+        // Scanner — привязываем к стандартному вводу (клавиатуре).
+        // Без этого при вызове readInt() или любом обращении к scanner → NullPointerException.
+        this.scanner = new Scanner(System.in);
+
+        // Коллекции — создаём пустые экземпляры.
+        // battleLog начинается заново — старые записи не нужны.
+        this.battleLog = new ArrayList<>();
+        this.undoStack = new ArrayDeque<>();
+
+        // Таблица лута — СТАТИЧЕСКИЕ данные, зашитые в коде.
+        // setupLootTable() заполняет lootTable фиксированными значениями.
+        this.lootTable = new HashMap<>();
+        setupLootTable();
+
+        // Listener — пересоздаём анонимный класс (тот же, что в конструкторе).
+        this.listener = new BattleEventListener() {
+            @Override
+            public void onAttack(GameCharacter attacker, DamageType damage, int actualDamage) {
+                System.out.println("  [EVENT] " + attacker.getName() + " атакует, урон: " + actualDamage);
+            }
+
+            @Override
+            public void onEnemyDefeated(GameCharacter hero, String enemyName, int expReward) {
+                System.out.println("  [EVENT] " + enemyName + " повержен! +" + expReward + " XP");
+            }
+
+            @Override
+            public void onLevelUp(GameCharacter hero, int newLevel) {
+                System.out.println("  ★ [EVENT] " + hero.getName() + " достиг уровня " + newLevel + "!");
+            }
+        };
+
+        // Сброс сессионных флагов боя.
+        this.damageDealtThisBattle = 0;
+        this.heroTookDamageThisBattle = false;
+        this.undoUsedThisBattle = false;
     }
 }

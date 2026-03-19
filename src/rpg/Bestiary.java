@@ -41,6 +41,19 @@ import java.util.Map;
 //   remove()  — удалить последний возвращённый элемент (необязательный метод).
 import java.util.Iterator;
 
+// ===== ИМПОРТ Serializable (глава 6.10) =====
+//
+// java.io.Serializable — маркерный интерфейс (marker interface).
+// «Маркерный» означает: в интерфейсе НЕТ ни одного метода!
+// Он лишь ПОМЕЧАЕТ класс как «разрешённый для сериализации».
+//
+// Сериализация — преобразование объекта в последовательность байтов (для записи в файл или
+// передачи по сети). Десериализация — обратный процесс: из байтов → объект.
+//
+// ObjectOutputStream.writeObject(obj) проверяет: obj instanceof Serializable.
+// Если класс НЕ реализует Serializable → выбросится NotSerializableException!
+import java.io.Serializable;
+
 // ===== БЕСТИАРИЙ — TREEMAP И NAVIGABLEMAP (глава 5.9, 5.10) =====
 //
 // Bestiary — справочник побеждённых врагов, отсортированный по имени.
@@ -86,7 +99,38 @@ import java.util.Iterator;
 //   Map.Entry — это интерфейс с двумя параметрами типа: <K, V>.
 //   K = String (ключ — имя врага), V = Bestiary.BestiaryEntry (значение — данные).
 //   Bestiary.BestiaryEntry — обращение к вложенному типу через имя внешнего класса.
-public class Bestiary implements Iterable<Map.Entry<String, Bestiary.BestiaryEntry>> {
+// ===== implements Serializable — РАЗРЕШАЕМ СЕРИАЛИЗАЦИЮ БЕСТИАРИЯ (глава 6.10) =====
+//
+// Bestiary хранит данные о побеждённых врагах — это часть состояния игры,
+// которое нужно сохранять в файл через ObjectOutputStream.writeObject().
+//
+// Для успешной сериализации ALL вложенные объекты тоже должны быть Serializable:
+//   - TreeMap<String, BestiaryEntry> — TreeMap реализует Serializable (из JDK).
+//   - String — реализует Serializable.
+//   - BestiaryEntry — наш record, добавляем Serializable ниже.
+//   - EnemyRank — enum, все enum в Java автоматически Serializable.
+//
+// Если хотя бы одно поле НЕ Serializable и НЕ transient → NotSerializableException!
+public class Bestiary implements Iterable<Map.Entry<String, Bestiary.BestiaryEntry>>, Serializable {
+
+    // ===== serialVersionUID — ИДЕНТИФИКАТОР ВЕРСИИ СЕРИАЛИЗАЦИИ (глава 6.10) =====
+    //
+    // private static final long serialVersionUID — уникальный идентификатор версии класса.
+    //
+    // ЗАЧЕМ НУЖЕН?
+    // При десериализации JVM проверяет: serialVersionUID в файле == serialVersionUID в классе.
+    // Если не совпадают → InvalidClassException (файл сохранения несовместим с текущим кодом).
+    //
+    // Без явного объявления JVM вычисляет serialVersionUID автоматически на основе:
+    //   - имени класса, модификаторов, интерфейсов, полей, методов.
+    //   Любое изменение СТРУКТУРЫ класса (переименование поля, смена типа, добавление метода)
+    //   может изменить UID. Комментарии и Javadoc на UID НЕ влияют — только код.
+    //   Это означает: даже безобидный рефакторинг может сделать старые сохранения нечитаемыми.
+    //
+    // ПРАВИЛО: ВСЕГДА объявляй serialVersionUID явно в Serializable-классах.
+    //   Увеличивай значение при НЕСОВМЕСТИМЫХ изменениях структуры (удаление полей, смена типов).
+    //   При СОВМЕСТИМЫХ изменениях (добавление полей) — можно оставить тот же UID.
+    private static final long serialVersionUID = 1L;
 
     // ===== ВЛОЖЕННЫЙ record (Inner Record) — НЕИЗМЕНЯЕМАЯ ЗАПИСЬ (глава 3.19) =====
     //
@@ -105,6 +149,29 @@ public class Bestiary implements Iterable<Map.Entry<String, Bestiary.BestiaryEnt
     //
     // record — неизменяем (immutable): все поля private final, значения нельзя изменить.
     // Для «изменения» создаём НОВЫЙ объект (паттерн withKill() — см. ниже).
+    // ===== RECORD + Serializable — ВЛОЖЕННЫЕ ТИПЫ ТОЖЕ ДОЛЖНЫ БЫТЬ SERIALIZABLE (глава 6.10) =====
+    //
+    // BestiaryEntry хранится как значение в TreeMap<String, BestiaryEntry> внутри Bestiary.
+    // При сериализации Bestiary → ObjectOutputStream рекурсивно сериализует ВСЁ содержимое:
+    //   Bestiary → TreeMap → каждый BestiaryEntry.
+    // Если BestiaryEntry НЕ Serializable → NotSerializableException!
+    //
+    // МОГУТ ЛИ record РЕАЛИЗОВЫВАТЬ Serializable? — ДА!
+    // record — это обычный класс (сгенерированный компилятором), может реализовывать любые интерфейсы.
+    // Более того, сериализация record БЕЗОПАСНЕЕ, чем сериализация обычных классов:
+    //
+    // ОБЫЧНЫЙ КЛАСС при десериализации:
+    //   1. JVM создаёт объект БЕЗ вызова конструктора (через sun.misc.Unsafe).
+    //   2. Поля заполняются напрямую из потока байтов (через reflection).
+    //   3. Валидация в конструкторе ПРОПУСКАЕТСЯ! Можно создать невалидный объект.
+    //
+    // RECORD при десериализации:
+    //   1. JVM читает компоненты из потока.
+    //   2. Вызывает КАНОНИЧЕСКИЙ КОНСТРУКТОР record с прочитанными значениями.
+    //   3. Валидация в compact-конструкторе ВЫПОЛНЯЕТСЯ! Объект всегда валиден.
+    //
+    // Это одно из преимуществ record: сериализация через конструктор гарантирует
+    // инварианты класса даже при чтении данных из ненадёжного источника.
     public record BestiaryEntry(
             // Количество убийств этого типа врага. int — примитивный 32-битный тип.
             int killCount,
@@ -120,7 +187,11 @@ public class Bestiary implements Iterable<Map.Entry<String, Bestiary.BestiaryEnt
             // Временная метка первой встречи с этим врагом (epoch time в миллисекундах).
             // long — 64-битное целое, необходим для хранения миллисекунд Unix-времени.
             long firstEncounter
-    ) {
+    ) implements Serializable {
+
+        // serialVersionUID для вложенного record — по тем же причинам, что и для внешнего класса.
+        // Каждый Serializable-тип должен иметь свой serialVersionUID.
+        private static final long serialVersionUID = 1L;
         // ===== ПАТТЕРН «WITH-МЕТОД» (Wither Pattern) =====
         //
         // record неизменяем — мы НЕ можем написать this.killCount++ или setKillCount().
