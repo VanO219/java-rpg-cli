@@ -405,6 +405,17 @@ public class Game implements Serializable {
     // Счётчик собранных предметов из лута (для достижения COLLECTOR).
     private int lootItemsCollected = 0;
 
+    // ===== НАРРАТИВНЫЙ РЕЖИМ — ИНТЕГРАЦИЯ BattleNarrator (глава 7.3) =====
+    //
+    // boolean — примитивный тип: хранит true (включён) или false (выключен).
+    // transient — режим не сохраняется: при загрузке игры нарратив выключен (по умолчанию false).
+    //
+    // Когда narrativeMode == true, в боевом цикле дополнительно выводятся
+    // красочные описания атак, сгенерированные через StringBuilder (BattleNarrator).
+    // Это демонстрирует ПРАКТИЧЕСКОЕ использование StringBuilder для сборки
+    // динамических строк (глава 7.3).
+    private transient boolean narrativeMode = false;
+
     // ===== СТАТИЧЕСКИЙ БЛОК ИНИЦИАЛИЗАЦИИ (глава 3.21) =====
     //
     // static { ... } — статический блок инициализации.
@@ -739,27 +750,44 @@ public class Game implements Serializable {
         System.out.print("Введите имя героя: ");
         String name = scanner.nextLine().trim();
 
-        // Валидация: пустое имя.
-        if (name.isEmpty()) {
-            // throw — бросаем исключение. Выполнение метода ПРЕКРАЩАЕТСЯ.
-            // Управление передаётся ближайшему catch-блоку в цепочке вызовов.
-            throw new InvalidActionException("ввод имени", "имя не может быть пустым");
+        // ===== ДЕЛЕГИРОВАНИЕ ВАЛИДАЦИИ В StringValidator (глава 7.4) =====
+        //
+        // Раньше здесь была inline-валидация: isEmpty(), length(), matches(regex).
+        // Теперь валидация ДЕЛЕГИРОВАНА в StringValidator.validateHeroName() —
+        // утилитный класс, который использует скомпилированный Pattern (Pattern.compile)
+        // и Matcher (matcher.matches(), matcher.group()) для проверки имени.
+        //
+        // Преимущества делегирования:
+        //   1. Pattern компилируется ОДИН раз (private static final) — быстрее,
+        //      чем String.matches() который компилирует regex при КАЖДОМ вызове.
+        //   2. Matcher.group() извлекает части имени (имя + прозвище) — расширенная валидация.
+        //   3. Логика валидации в одном месте — легче менять правила.
+        //
+        // validateHeroName() возвращает строку:
+        //   "OK: ..." — имя допустимо
+        //   "ОШИБКА: ..." — описание ошибки
+        //
+        // String.startsWith(prefix) — проверяет начало строки (глава 7.2).
+        // Здесь проверяем, начинается ли результат с "OK" или "ОШИБКА".
+        String validationResult = StringValidator.validateHeroName(name);
+
+        if (!validationResult.startsWith("OK")) {
+            // Результат начинается с "ОШИБКА:" — извлекаем текст ошибки.
+            // substring(beginIndex) — возвращает подстроку от указанного индекса до конца.
+            // "ОШИБКА: ".length() = 8 — пропускаем префикс, берём описание.
+            String errorMsg = validationResult.length() > 8
+                    ? validationResult.substring(8)
+                    : validationResult;
+            throw new InvalidActionException("ввод имени", errorMsg);
         }
 
-        // Валидация: слишком длинное имя (больше 20 символов).
+        // Дополнительная проверка длины (StringValidator не проверяет максимальную длину).
         if (name.length() > 20) {
             throw new InvalidActionException("ввод имени",
                     "имя слишком длинное (" + name.length() + " символов, максимум 20)");
         }
 
-        // Валидация: спецсимволы. Разрешены только буквы, пробелы и дефисы.
-        // String.matches(regex) — проверяет, соответствует ли строка регулярному выражению.
-        // [a-zA-Zа-яА-ЯёЁ\\s-]+ — буквы (латиница + кириллица), пробелы, дефисы.
-        if (!name.matches("[a-zA-Zа-яА-ЯёЁ\\s-]+")) {
-            throw new InvalidActionException("ввод имени",
-                    "имя содержит недопустимые символы (разрешены только буквы, пробелы и дефисы)");
-        }
-
+        System.out.println("  [Валидация] " + validationResult);
         return name;
     }
 
@@ -1029,6 +1057,15 @@ public class Game implements Serializable {
             //   !enemy.isAlive() == true, если isAlive() == false (враг мёртв).
             // && — оба условия ОБЯЗАТЕЛЬНЫ: засчитываем победу только при полной победе.
             if (!fled && !enemy.isAlive()) {
+                // ===== НАРРАТИВНЫЙ РЕЖИМ — ОПИСАНИЕ ПОБЕДЫ (глава 7.3) =====
+                //
+                // BattleNarrator.narrateDefeat() генерирует описание гибели врага через StringBuilder.
+                // Использует: toUpperCase(), replace(), substring(), compareTo(), getChars(),
+                // new String(char[], offset, count) — всё из главы 7.2.
+                if (narrativeMode) {
+                    System.out.println(BattleNarrator.narrateDefeat(enemy.getName()));
+                }
+
                 // ++ — постфиксный инкремент: увеличивает enemiesDefeated на 1.
                 // Эквивалентно: enemiesDefeated = enemiesDefeated + 1.
                 enemiesDefeated++;
@@ -1150,7 +1187,12 @@ public class Game implements Serializable {
             System.out.println("  8. Экспорт журнала боёв");
             System.out.println("  9. ZIP-архив сохранений");
             System.out.println("  10. Console demo");
-            System.out.println("  11. Покинуть");
+            // ===== НОВЫЕ ПУНКТЫ МЕНЮ — РАБОТА СО СТРОКАМИ (глава 7) =====
+            System.out.println("  11. Демо строк (TextFormatter)");
+            // Тернарный оператор: показываем текущий статус нарративного режима.
+            // narrativeMode ? "ВКЛ" : "ВЫКЛ" — краткая запись if-else для выбора строки.
+            System.out.println("  12. Нарративный режим [" + (narrativeMode ? "ВКЛ" : "ВЫКЛ") + "]");
+            System.out.println("  13. Покинуть");
             System.out.print("Ваш выбор: ");
             int choice = readInt();
 
@@ -1236,7 +1278,35 @@ public class Game implements Serializable {
                     ConsoleDemo.runDemo(scanner);
                 }
 
+                // ===== ДЕМОНСТРАЦИЯ TextFormatter (глава 7.1, 7.3) =====
+                //
+                // showStringDemo() — метод Game, демонстрирующий TextFormatter:
+                //   - centerText() — центрирование (String.length(), repeat, substring)
+                //   - buildProgressBar() — полоска HP/XP (StringBuilder, setCharAt)
+                //   - buildTable() — таблица (StringBuilder, append, insert)
+                //   - buildFrame() — рамка (StringBuilder, repeat, ensureCapacity)
+                //   - scrambleText() — шифрование (toCharArray, charAt, new String(char[]))
                 case 11 -> {
+                    showStringDemo();
+                }
+
+                // ===== ПЕРЕКЛЮЧЕНИЕ НАРРАТИВНОГО РЕЖИМА (глава 7.3) =====
+                //
+                // narrativeMode = !narrativeMode — инверсия boolean:
+                //   true → false, false → true.
+                // ! — оператор логического НЕ (отрицания).
+                // Аналогия с XOR для одного бита (^= в handleDefend),
+                // но для boolean проще использовать !.
+                case 12 -> {
+                    narrativeMode = !narrativeMode;
+                    System.out.println("Нарративный режим: " + (narrativeMode ? "ВКЛЮЧЁН" : "ВЫКЛЮЧЕН"));
+                    if (narrativeMode) {
+                        System.out.println("  Теперь боевые действия будут сопровождаться красочными описаниями!");
+                        System.out.println("  (Описания генерируются через StringBuilder — глава 7.3)");
+                    }
+                }
+
+                case 13 -> {
                     return false;
                 }
                 default -> System.out.println("Неверный выбор.");
@@ -1945,8 +2015,40 @@ public class Game implements Serializable {
             //   6   — отмена хода (только если доступна: стек не пуст и отмена не использована).
             int action;
             while (true) {
-                System.out.print("Ваш выбор: ");
-                action = readInt();
+                // ===== ПОДДЕРЖКА ТЕКСТОВЫХ КОМАНД — CommandParser (глава 7.2) =====
+                //
+                // Ввод читается как строка. Сначала пытаемся преобразовать в число (Integer.parseInt).
+                // Если это не число (NumberFormatException) — пробуем распознать как текстовую
+                // команду через CommandParser.parse() (split, strip, toLowerCase, equalsIgnoreCase).
+                //
+                // Это ДОПОЛНЕНИЕ к числовому вводу, а не замена.
+                // Демонстрирует: split(), strip(), toLowerCase(), equalsIgnoreCase(),
+                // startsWith(), contains(), indexOf(), String.join() — всё из главы 7.2.
+                System.out.print("Ваш выбор (число или команда): ");
+                String rawInput = scanner.nextLine().trim();
+
+                // ===== ОБРАБОТКА ЧИТ-КОДОВ — StringValidator (глава 7.4) =====
+                //
+                // String.startsWith(prefix) — проверяет, начинается ли строка с указанной подстроки.
+                // "/" — префикс чит-кодов. StringValidator.parseCheatCode() использует
+                // Pattern + Matcher с группами захвата для разбора команды.
+                if (rawInput.startsWith("/")) {
+                    handleCheatCode(rawInput);
+                    continue;
+                }
+
+                // Пытаемся преобразовать в число.
+                // Integer.parseInt() бросит NumberFormatException при нечисловом вводе.
+                try {
+                    action = Integer.parseInt(rawInput);
+                } catch (NumberFormatException e) {
+                    // Не число — пробуем как текстовую команду.
+                    action = tryParseTextCommand(rawInput);
+                    if (action == -1) {
+                        System.out.println("Неизвестная команда. Введите 'помощь' для списка команд.");
+                        continue;
+                    }
+                }
 
                 // Определяем максимальный допустимый номер действия.
                 // Если доступна отмена хода (действие 6) — maxAction = 6, иначе 5.
@@ -2111,6 +2213,21 @@ public class Game implements Serializable {
                 System.out.println(hero.getName() + " наносит " + amt + " магического урона (" + elem + ")!");
             case DamageType.Mixed(var phys, var mag) ->
                 System.out.println(hero.getName() + " наносит " + phys + " физ. + " + mag + " маг. урона!");
+        }
+
+        // ===== НАРРАТИВНЫЙ РЕЖИМ — BattleNarrator (глава 7.3) =====
+        //
+        // Если narrativeMode включён, выводим красочное описание атаки.
+        // BattleNarrator.narrateAttack() собирает строку через StringBuilder:
+        //   - append() для цепочки фрагментов текста
+        //   - setLength() для обрезки при промахе
+        //   - deleteCharAt() для коррекции символов
+        //   - toString() для финального результата
+        //
+        // isCrit = false для обычной атаки (критический удар — только у Archer в specialAttack).
+        if (narrativeMode) {
+            System.out.println("  " + BattleNarrator.narrateAttack(
+                    hero.getName(), enemy.getName(), dmg, false));
         }
 
         // Добавляем в лог боя (5.2).
@@ -2280,6 +2397,16 @@ public class Game implements Serializable {
             // Умножаем на 100 → 35.0, затем (int) → 35.
             // ВНИМАНИЕ: (int) обрезает, а не округляет! 0.999 * 100 = 99.9 → (int) = 99.
             System.out.println("Шанс крита: " + (int) (a.getCritChance() * 100) + "%");
+        }
+
+        // ===== НАРРАТИВНЫЙ РЕЖИМ — СПЕЦАТАКА (глава 7.3) =====
+        //
+        // Для спецатаки isCrit = true — спецатака заслуживает критического описания.
+        // BattleNarrator.narrateAttack() с isCrit добавит "💥 КРИТИЧЕСКИЙ УДАР!"
+        // через StringBuilder.append() в начале строки.
+        if (narrativeMode) {
+            System.out.println("  " + BattleNarrator.narrateAttack(
+                    hero.getName(), enemy.getName(), dmg, true));
         }
 
         // Лог боя.
@@ -2576,6 +2703,15 @@ public class Game implements Serializable {
         // но на самом деле получал только 5 (при защите 10). Это вводило в заблуждение.
         System.out.println(enemy.getName() + " атакует и наносит " + actualDamage + " урона!");
 
+        // ===== НАРРАТИВНЫЙ РЕЖИМ — АТАКА ВРАГА (глава 7.3) =====
+        //
+        // BattleNarrator.narrateAttack() генерирует описание атаки врага.
+        // isCrit = false — враги не делают критических ударов в текущей механике.
+        if (narrativeMode) {
+            System.out.println("  " + BattleNarrator.narrateAttack(
+                    enemy.getName(), hero.getName(), actualDamage, false));
+        }
+
         battleLog.add(enemy.getName() + " атакует: " + actualDamage + " урона");
 
         // С вероятностью 20% враг отравляет героя.
@@ -2675,8 +2811,18 @@ public class Game implements Serializable {
 
     private void showFinalStats() {
         System.out.println();
-        System.out.println("╔══════════════════════════════════════╗");
-        System.out.println("║         ИТОГИ ПРИКЛЮЧЕНИЯ           ║");
+
+        // ===== TextFormatter.buildFrame() — ЗАМЕНА ХАРДКОДНОЙ РАМКИ (глава 7.1, 7.3) =====
+        //
+        // Раньше рамка рисовалась литералами: "╔══════...╗", "║...║", "╚══════...╝".
+        // Теперь используется TextFormatter.buildFrame(title, lines) — метод, который:
+        //   1. Вычисляет ширину рамки через String.length() (глава 7.1)
+        //   2. Строит рамку через StringBuilder.append() и "═".repeat(n) (глава 7.3)
+        //   3. Центрирует заголовок через repeat() и substring() (глава 7.1)
+        //
+        // List.of() — создание неизменяемого списка (Java 9+).
+        // Передаём пустой список строк — содержимое выведем отдельно (сохраняя существующую логику).
+        System.out.println(TextFormatter.buildFrame("ИТОГИ ПРИКЛЮЧЕНИЯ", List.of()));
         System.out.println("╠══════════════════════════════════════╣");
 
         // ===== СОЗДАНИЕ record BattleStats =====
@@ -3268,5 +3414,285 @@ public class Game implements Serializable {
         this.damageDealtThisBattle = 0;
         this.heroTookDamageThisBattle = false;
         this.undoUsedThisBattle = false;
+    }
+
+    // ===== showStringDemo() — ДЕМОНСТРАЦИЯ TextFormatter (глава 7.1, 7.3) =====
+    //
+    // Метод демонстрирует ВСЕ возможности TextFormatter с использованием игровых данных.
+    // TextFormatter — утилитный класс (final, private constructor, static methods).
+    // Все его методы построены на String (глава 7.1) и StringBuilder (глава 7.3).
+    //
+    // private — метод доступен только внутри Game.java.
+    // Вызывается из betweenBattlesMenu() (case 11).
+    private void showStringDemo() {
+        System.out.println();
+
+        // ===== TextFormatter.centerText() — ЦЕНТРИРОВАНИЕ СТРОК (глава 7.1) =====
+        //
+        // centerText(text, width) — центрирует текст в поле заданной ширины.
+        // Использует: String.length() (глава 7.1), " ".repeat(n) (глава 7.1).
+        //
+        // String.length() — возвращает количество символов (int).
+        //   "Hello".length() → 5
+        //   "Привет".length() → 6 (кириллица — тоже по 1 char-символу)
+        //
+        // String.repeat(n) — повторяет строку n раз (Java 11+):
+        //   "ab".repeat(3) → "ababab"
+        //   " ".repeat(5) → "     " (5 пробелов)
+        System.out.println(TextFormatter.centerText("═══ ДЕМО РАБОТЫ СО СТРОКАМИ ═══", 50));
+        System.out.println();
+
+        // ===== TextFormatter.buildProgressBar() — ПОЛОСКА HP/XP (глава 7.3) =====
+        //
+        // buildProgressBar(current, max, width) — генерирует текстовую полоску прогресса.
+        // Использует StringBuilder:
+        //   - new StringBuilder(width) — задаём ёмкость заранее (оптимизация).
+        //   - setCharAt(index, char) — замена символа по индексу (заполнение блоками).
+        //   - append() — добавление текста в конец.
+        //
+        // hero.getHealth(), hero.getMaxHealth() — текущее и максимальное HP героя.
+        System.out.println("  HP героя: " + TextFormatter.buildProgressBar(
+                hero.getHealth(), hero.getMaxHealth(), 30));
+        System.out.println("  XP героя: " + TextFormatter.buildProgressBar(
+                hero.getExperience(), hero.getLevel() * 100, 30));
+        System.out.println();
+
+        // ===== TextFormatter.buildTable() — ТАБЛИЦА СТАТИСТИКИ (глава 7.3) =====
+        //
+        // buildTable(rows) — генерирует ASCII-таблицу из двумерного массива строк.
+        // Использует StringBuilder:
+        //   - append() — добавление ячеек и разделителей
+        //   - insert() — вставка символов в середину строки
+        //   - length() — для вычисления позиций вставки
+        //
+        // List.of() — создание неизменяемого списка (Java 9+).
+        // String.valueOf() — преобразование примитивов (int) в String.
+        List<String[]> tableData = List.of(
+                new String[]{"Характеристика", "Значение"},
+                new String[]{"Имя", hero.getName()},
+                new String[]{"Уровень", String.valueOf(hero.getLevel())},
+                new String[]{"HP", hero.getHealth() + "/" + hero.getMaxHealth()},
+                new String[]{"Атака", String.valueOf(hero.getAttack())},
+                new String[]{"Защита", String.valueOf(hero.getDefense())},
+                new String[]{"Врагов побеждено", String.valueOf(enemiesDefeated)},
+                new String[]{"Урон нанесён", String.valueOf(totalDamageDealt)}
+        );
+        System.out.println(TextFormatter.buildTable(tableData));
+        System.out.println();
+
+        // ===== TextFormatter.buildFrame() — РАМКА С ТЕКСТОМ (глава 7.3) =====
+        //
+        // buildFrame(title, lines) — создаёт декоративную рамку вокруг текста.
+        // Использует StringBuilder:
+        //   - ensureCapacity(n) — предвыделение памяти (оптимизация, глава 7.3)
+        //   - append() и repeat() — построение рамки
+        //
+        // List.of() — неизменяемый список строк для содержимого рамки.
+        System.out.println(TextFormatter.buildFrame("Герой", List.of(
+                "Имя: " + hero.getName(),
+                "Класс: " + hero.getClassName(),
+                "Уровень: " + hero.getLevel()
+        )));
+        System.out.println();
+
+        // ===== TextFormatter.scrambleText() — «ЗАШИФРОВАННЫЙ» ТЕКСТ (глава 7.1) =====
+        //
+        // scrambleText(text) — «шифрует» текст, заменяя буквы на символы.
+        // Использует:
+        //   - toCharArray() — преобразование String в char[] (глава 7.1).
+        //     Создаёт КОПИЮ символов строки в виде массива.
+        //     Изменение массива НЕ влияет на оригинальную строку (immutability).
+        //   - charAt(index) — получение символа по индексу (глава 7.1).
+        //   - new String(char[]) — создание String из массива символов (глава 7.1).
+        //
+        // Демонстрируем на имени героя — как если бы имя было «зашифровано».
+        String originalName = hero.getName();
+        String scrambled = TextFormatter.scrambleText(originalName);
+        System.out.println("  Имя: " + originalName);
+        System.out.println("  Зашифровано: " + scrambled);
+        System.out.println();
+
+        // ===== TextFormatter.reverseText() — РЕВЕРС СТРОКИ (глава 7.3) =====
+        //
+        // reverseText(text) — переворачивает строку через StringBuilder.reverse().
+        // reverse() — встроенный метод StringBuilder (глава 7.3):
+        //   new StringBuilder("Hello").reverse().toString() → "olleH"
+        System.out.println("  Реверс: " + TextFormatter.reverseText(originalName));
+        System.out.println();
+
+        // ===== TextFormatter.padRight() / padLeft() — ВЫРАВНИВАНИЕ (глава 7.1) =====
+        //
+        // padRight(text, width) — дополняет строку пробелами справа до нужной ширины.
+        // padLeft(text, width) — дополняет пробелами слева.
+        // Использует: String.length() и " ".repeat(n).
+        System.out.println("  Выравнивание:");
+        System.out.println("  |" + TextFormatter.padRight("Слева", 20) + "|");
+        System.out.println("  |" + TextFormatter.padLeft("Справа", 20) + "|");
+        System.out.println("  |" + TextFormatter.centerText("По центру", 20) + "|");
+        System.out.println();
+
+        // ===== TextFormatter.truncate() — ОБРЕЗКА СТРОКИ (глава 7.1) =====
+        //
+        // truncate(text, maxLen) — обрезает строку до maxLen символов, добавляя "...".
+        // Использует: String.length() и substring(0, maxLen).
+        String longText = "Это очень длинный текст, который нужно обрезать для демонстрации метода truncate";
+        System.out.println("  Оригинал: " + longText);
+        System.out.println("  Обрезано:  " + TextFormatter.truncate(longText, 30));
+
+        System.out.println();
+        System.out.println(TextFormatter.centerText("═══ КОНЕЦ ДЕМО ═══", 50));
+    }
+
+    // ===== tryParseTextCommand() — ПАРСИНГ ТЕКСТОВЫХ КОМАНД (глава 7.2) =====
+    //
+    // Метод пытается распознать текстовый ввод как боевую команду.
+    // Используется когда Integer.parseInt() не смог преобразовать ввод в число
+    // (NumberFormatException) — значит, пользователь ввёл текст, а не цифру.
+    //
+    // Возвращает номер действия (1-5) или -1, если команда не распознана.
+    //
+    // CommandParser — утилитный класс (final, private constructor, static methods).
+    // CommandParser.parse(input) использует:
+    //   - strip() — удаление пробелов (глава 7.2)
+    //   - toLowerCase() — нормализация регистра (глава 7.2)
+    //   - split("\\s+", 2) — разделение на команду и аргумент (глава 7.2)
+    //   - isEmpty(), isBlank() — проверка пустоты (глава 7.2)
+    //
+    // CommandParser.matchCommand() использует:
+    //   - equalsIgnoreCase() — сравнение без учёта регистра (глава 7.2)
+    //   - regionMatches(ignoreCase, ...) — сравнение подстроки (глава 7.2)
+    private int tryParseTextCommand(String input) {
+        if (input == null || input.isBlank()) {
+            return -1;
+        }
+
+        // ===== CommandParser.parse() — РАЗБОР СТРОКИ НА КОМАНДУ И АРГУМЕНТ (глава 7.2) =====
+        //
+        // parse() возвращает ParsedCommand — вложенный record с полями command и argument.
+        // record ParsedCommand(String command, String argument) — immutable, auto-generated
+        //   equals/hashCode/toString (глава 3.19).
+        //
+        // command() — геттер record (без префикса get): возвращает нормализованную команду.
+        CommandParser.ParsedCommand cmd = CommandParser.parse(input);
+
+        // ===== CommandParser.matchCommand() — СОПОСТАВЛЕНИЕ С АЛИАСАМИ (глава 7.2) =====
+        //
+        // matchCommand(input, aliases...) — проверяет, совпадает ли ввод с одним из алиасов.
+        // Использует:
+        //   - equalsIgnoreCase() — "АТАКА".equalsIgnoreCase("атака") → true
+        //   - regionMatches(true, 0, alias, 0, alias.length()) — частичное совпадение
+        //
+        // varargs (String... aliases) — метод принимает переменное число аргументов.
+        // Внутри метода aliases — это String[] (массив).
+        if (CommandParser.matchCommand(cmd.command(), "атака", "attack", "ат", "а")) {
+            return 1;
+        }
+        if (CommandParser.matchCommand(cmd.command(), "спец", "special", "сп")) {
+            return 2;
+        }
+        if (CommandParser.matchCommand(cmd.command(), "зелье", "potion", "предмет", "item")) {
+            return 3;
+        }
+        if (CommandParser.matchCommand(cmd.command(), "защита", "defend", "щит", "за")) {
+            return 4;
+        }
+        if (CommandParser.matchCommand(cmd.command(), "бег", "flee", "бежать", "run")) {
+            return 5;
+        }
+
+        // ===== КОМАНДА «ПОМОЩЬ» — CommandParser.buildHelp() (глава 7.2) =====
+        //
+        // buildHelp() демонстрирует String.join(), concat(), startsWith(), endsWith(),
+        // compareTo(), toUpperCase(), getChars(), replace() — весь арсенал главы 7.2.
+        if (CommandParser.matchCommand(cmd.command(), "помощь", "help", "?")) {
+            System.out.println(CommandParser.buildHelp());
+            System.out.println("  Боевые команды: атака, спец, зелье, защита, бег");
+            return -1;
+        }
+
+        return -1;
+    }
+
+    // ===== handleCheatCode() — ОБРАБОТКА ЧИТ-КОДОВ (глава 7.4) =====
+    //
+    // Метод обрабатывает чит-коды, введённые с префиксом "/" в боевом меню.
+    // StringValidator.parseCheatCode() использует:
+    //   - Pattern.compile() — компиляция regex в объект Pattern (глава 7.4)
+    //   - Matcher.matches() — полное совпадение строки с паттерном (глава 7.4)
+    //   - Matcher.group(1), group(2) — извлечение групп захвата (глава 7.4)
+    //   - String.split("\\s+") — разбиение по пробелам для демонстрации (глава 7.4)
+    //   - Pattern.split() — то же через скомпилированный Pattern (глава 7.4)
+    //
+    // Поддерживаемые чит-коды:
+    //   /give_gold N — добавить золото (в нашей игре — HP)
+    //   /heal        — полное исцеление
+    //   /levelup     — повысить уровень
+    //
+    // private — чит-коды доступны только внутри Game.
+    private void handleCheatCode(String input) {
+        // ===== StringValidator.parseCheatCode() — ПАРСИНГ ЧЕРЕЗ regex (глава 7.4) =====
+        //
+        // Возвращает String[] из 3 элементов:
+        //   [0] — статус: "OK" или "ОШИБКА"
+        //   [1] — команда (give_gold, heal, levelup) или описание ошибки
+        //   [2] — числовой аргумент (или "" если нет)
+        //
+        // Внутри: CHEAT_CODE_PATTERN = Pattern.compile("^/([a-z_]+)(?:\\s+(\\d+))?$")
+        //   ^/         — начало строки + символ /
+        //   ([a-z_]+)  — группа 1: команда (буквы и подчёркивания)
+        //   (?:\\s+     — незахватывающая группа: пробелы
+        //    (\\d+)     — группа 2: число
+        //   )?          — группа необязательна (? = 0 или 1 раз)
+        //   $           — конец строки
+        String[] cheatResult = StringValidator.parseCheatCode(input);
+
+        if (!"OK".equals(cheatResult[0])) {
+            // String.equals() — сравнение содержимого строк (глава 7.2).
+            // ВАЖНО: "OK".equals(x), а НЕ x.equals("OK") — защита от NPE!
+            // Если x == null: "OK".equals(null) → false. null.equals("OK") → NPE!
+            System.out.println("  [Чит] " + cheatResult[1]);
+            return;
+        }
+
+        // ===== switch ПО СТРОКЕ — ОБРАБОТКА ЧИТ-КОМАНД =====
+        //
+        // Java позволяет switch по String (с Java 7+).
+        // Внутри Java использует hashCode() + equals() для сопоставления.
+        //
+        // cheatResult[1] — команда, извлечённая через Matcher.group(1).
+        // cheatResult[2] — аргумент, извлечённый через Matcher.group(2).
+        switch (cheatResult[1]) {
+            case "give_gold" -> {
+                // Конвертируем аргумент в число. В нашей игре нет золота — добавляем HP.
+                if (!cheatResult[2].isEmpty()) {
+                    // Integer.parseInt() — преобразование String в int (глава 7.2).
+                    int amount = Integer.parseInt(cheatResult[2]);
+                    hero.heal(amount);
+                    System.out.println("  [Чит] +" + amount + " HP! (HP: "
+                            + hero.getHealth() + "/" + hero.getMaxHealth() + ")");
+                } else {
+                    System.out.println("  [Чит] Укажите количество: /give_gold 50");
+                }
+            }
+            case "heal" -> {
+                // Полное исцеление: устанавливаем HP = maxHP.
+                int healed = hero.getMaxHealth() - hero.getHealth();
+                hero.heal(healed);
+                System.out.println("  [Чит] Полное исцеление! (HP: "
+                        + hero.getHealth() + "/" + hero.getMaxHealth() + ")");
+            }
+            case "levelup" -> {
+                // Добавляем опыт для гарантированного повышения уровня.
+                // hero.addExperience() возвращает true при повышении уровня.
+                boolean leveled = hero.addExperience(hero.getLevel() * 100);
+                System.out.println("  [Чит] " + (leveled ? "Уровень повышен!" : "Опыт добавлен!") +
+                        " (Уровень: " + hero.getLevel() + ")");
+            }
+            default -> {
+                // Неизвестный чит-код.
+                System.out.println("  [Чит] Неизвестная команда: " + cheatResult[1]);
+                System.out.println("  Доступные чит-коды: /give_gold N, /heal, /levelup");
+            }
+        }
     }
 }

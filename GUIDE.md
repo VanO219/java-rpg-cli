@@ -17,6 +17,7 @@
 | 4 | [GUIDE_CHAPTER_4.md](GUIDES/GUIDE_CHAPTER_4.md) | Обработка исключений | 4.1–4.4 |
 | 5 | [GUIDE_CHAPTER_5.md](GUIDES/GUIDE_CHAPTER_5.md) | Коллекции | 5.1–5.10 |
 | 6 | [GUIDE_CHAPTER_6.md](GUIDES/GUIDE_CHAPTER_6.md) | Потоки ввода-вывода | 6.1–6.13 |
+| 7 | [GUIDE_CHAPTER_7.md](GUIDES/GUIDE_CHAPTER_7.md) | Работа со строками | 7.1–7.4 |
 
 ---
 
@@ -35,6 +36,7 @@ Main.main()
             │    ├─> battle()             // PriorityQueue, assert, callback
             │    ├─> handleLoot()         // HashMap, HashSet достижений
             │    └─> betweenBattlesMenu() // Bestiary, leaderboard, save/load/export/zip
+            │    └─> showStringDemo()        // TextFormatter, BattleNarrator, StringValidator
             └─> showFinalStats()          // record BattleStats, TreeSet рекордов
 ```
 
@@ -72,6 +74,10 @@ Main.main()
 | 26 | `SaveArchiver.java` | `ZipOutputStream`, `ZipInputStream` |
 | 27 | `ConsoleDemo.java` | `Console`, `readPassword()` |
 | 28 | `Game.java` | Всё вместе: коллекции, исключения, I/O, `Serializable`, `transient` |
+| 29 | `TextFormatter.java` | `StringBuilder` полностью, `length`, `toCharArray`, `repeat`, `substring` |
+| 30 | `CommandParser.java` | Все операции со строками: `split`, `strip`, `equals`, `indexOf`, `join` |
+| 31 | `BattleNarrator.java` | `StringBuilder`: `append`, `insert`, `delete`, `replace`, `reverse`; `StringBuffer` |
+| 32 | `StringValidator.java` | `Pattern`, `Matcher`: `compile`, `matches`, `find`, `group`, `start`, `end` |
 
 > Совет: открой файл и читай комментарии сверху вниз. Каждый комментарий объясняет конструкцию Java, которая идёт сразу после него.
 
@@ -98,4 +104,8 @@ src/rpg/
   BattleLogExporter.java             — экспорт журнала боёв
   SaveArchiver.java                  — ZIP-архивация сохранений
   ConsoleDemo.java                   — демо Console API
+  TextFormatter.java                 — форматирование текста (String + StringBuilder)
+  CommandParser.java                 — парсинг текстовых команд (операции со строками)
+  BattleNarrator.java                — генерация боевых описаний (StringBuilder + StringBuffer)
+  StringValidator.java               — валидация с regex (Pattern, Matcher)
 ```

@@ -794,8 +794,32 @@ public class Enemy implements Cloneable, Comparable<Enemy>, Serializable {
         // rank.formatName(name) — метод enum EnemyRank, форматирующий имя с учётом ранга.
         // Например: COMMON → "Гоблин", ELITE → "Элитный Гоблин", BOSS → "★ Гоблин ★".
         String displayName = rank.formatName(name);
-        // Конкатенация строк (+) — объединение нескольких строк в одну.
-        // int автоматически преобразуется в строку при конкатенации (вызывается Integer.toString()).
-        return displayName + " [HP: " + health + " ATK: " + attack + "]";
+
+        // ===== StringBuilder (глава 7.3) =====
+        //
+        // StringBuilder — изменяемый буфер символов: не создаёт промежуточных строк
+        // при сборке. Полное объяснение (immutability, capacity, method chaining,
+        // append-overloads) — см. GameCharacter.java, метод toString().
+        //
+        // Здесь конструктор без аргументов: начальная ёмкость = 16 символов.
+        // Этого хватит; при нехватке StringBuilder удваивает буфер автоматически.
+        StringBuilder sb = new StringBuilder();
+
+        // append(String) — добавляет строку (результат метода rank.formatName)
+        sb.append(displayName)
+          // append(String) — добавляет строковый литерал
+          .append(" [HP: ")
+          // append(int) — добавляет целое число, автоматически преобразуя в текст
+          // (вызывается Integer.toString(health) внутри StringBuilder)
+          .append(health)
+          .append(" ATK: ")
+          // append(int) — ещё одно целое число
+          .append(attack)
+          // append(char) — добавляет один символ (экономичнее, чем append("]"))
+          .append(']');
+
+        // toString() — собирает финальную строку из внутреннего буфера StringBuilder.
+        // Результат идентичен прежней конкатенации: "Элитный Гоблин [HP: 150 ATK: 30]"
+        return sb.toString();
     }
 }
